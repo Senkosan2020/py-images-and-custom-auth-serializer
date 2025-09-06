@@ -86,16 +86,12 @@ class MovieSessionSerializer(serializers.ModelSerializer):
         fields = ("id", "show_time", "movie", "cinema_hall")
 
 
-class MovieSessionListSerializer(MovieSessionSerializer):
+class MovieSessionListSerializer(serializers.ModelSerializer):
     movie_title = serializers.CharField(source="movie.title", read_only=True)
-    cinema_hall_name = serializers.CharField(
-        source="cinema_hall.name", read_only=True
-    )
-    cinema_hall_capacity = serializers.IntegerField(
-        source="cinema_hall.capacity", read_only=True
-    )
-    tickets_available = serializers.IntegerField(read_only=True)
     movie_image = serializers.ImageField(source="movie.image", read_only=True)
+    cinema_hall_name = serializers.CharField(source="cinema_hall.name", read_only=True)
+    cinema_hall_capacity = serializers.SerializerMethodField()
+    tickets_available = serializers.SerializerMethodField()
 
     class Meta:
         model = MovieSession
@@ -109,17 +105,23 @@ class MovieSessionListSerializer(MovieSessionSerializer):
             "tickets_available",
         )
 
-        def get_cinema_hall_capacity(self, obj: MovieSession) -> int:
-            hall = obj.cinema_hall
-            return int(hall.rows * hall.seats_in_row)
+    def get_cinema_hall_capacity(self, obj: MovieSession) -> int:
+        hall = obj.cinema_hall
+        return getattr(hall, "capacity", hall.rows * hall.seats_in_row)
 
-        def get_tickets_available(self, obj: MovieSession) -> int:
-            cap = self.get_cinema_hall_capacity(obj)
-            taken = getattr(obj, "tickets_count", None)
-            if taken is None:
-                taken = obj.tickets.count()
-            left = cap - int(taken)
-            return left if left > 0 else 0
+    def get_tickets_available(self, obj: MovieSession) -> int:
+        if hasattr(obj, "tickets_available"):
+            try:
+                return max(int(obj.tickets_available), 0)
+            except (TypeError, ValueError):
+                pass
+        hall = obj.cinema_hall
+        capacity = getattr(hall, "capacity", hall.rows * hall.seats_in_row)
+        sold = getattr(obj, "tickets_count", None)
+        if sold is None:
+            sold = obj.tickets.count()
+        left = int(capacity) - int(sold)
+        return left if left > 0 else 0
 
 
 class TicketSerializer(serializers.ModelSerializer):
