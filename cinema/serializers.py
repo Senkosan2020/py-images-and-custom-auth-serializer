@@ -1,6 +1,6 @@
 from django.db import transaction
 from rest_framework import serializers
-
+from typing import List, Dict
 from cinema.models import (
     Genre,
     Actor,
@@ -43,6 +43,24 @@ class MovieListSerializer(MovieSerializer):
     actors = serializers.SlugRelatedField(
         many=True, read_only=True, slug_field="full_name"
     )
+    image = serializers.ImageField(read_only=True)
+
+    class Meta:
+        model = Movie
+        fields = (
+            "id",
+            "title",
+            "description",
+            "duration",
+            "genres",
+            "actors",
+            "image"
+        )
+
+    def get_actors(self, obj: Movie) -> List[str]:
+        return [
+            f"{a.first_name} {a.last_name}".strip() for a in obj.actors.all()
+        ]
 
 
 class MovieDetailSerializer(MovieSerializer):
@@ -51,7 +69,15 @@ class MovieDetailSerializer(MovieSerializer):
 
     class Meta:
         model = Movie
-        fields = ("id", "title", "description", "duration", "genres", "actors")
+        fields = (
+            "id",
+            "title",
+            "description",
+            "duration",
+            "genres",
+            "actors",
+            "image"
+        )
 
 
 class MovieSessionSerializer(serializers.ModelSerializer):
@@ -69,6 +95,7 @@ class MovieSessionListSerializer(MovieSessionSerializer):
         source="cinema_hall.capacity", read_only=True
     )
     tickets_available = serializers.IntegerField(read_only=True)
+    movie_image = serializers.ImageField(source="movie.image", read_only=True)
 
     class Meta:
         model = MovieSession
@@ -76,10 +103,23 @@ class MovieSessionListSerializer(MovieSessionSerializer):
             "id",
             "show_time",
             "movie_title",
+            "movie_image",
             "cinema_hall_name",
             "cinema_hall_capacity",
             "tickets_available",
         )
+
+        def get_cinema_hall_capacity(self, obj: MovieSession) -> int:
+            hall = obj.cinema_hall
+            return int(hall.rows * hall.seats_in_row)
+
+        def get_tickets_available(self, obj: MovieSession) -> int:
+            cap = self.get_cinema_hall_capacity(obj)
+            taken = getattr(obj, "tickets_count", None)
+            if taken is None:
+                taken = obj.tickets.count()
+            left = cap - int(taken)
+            return left if left > 0 else 0
 
 
 class TicketSerializer(serializers.ModelSerializer):
@@ -116,6 +156,9 @@ class MovieSessionDetailSerializer(MovieSessionSerializer):
         model = MovieSession
         fields = ("id", "show_time", "movie", "cinema_hall", "taken_places")
 
+    def get_taken_places(self, obj: MovieSession) -> List[Dict[str, int]]:
+        return list(obj.tickets.values("row", "seat"))
+
 
 class OrderSerializer(serializers.ModelSerializer):
     tickets = TicketSerializer(many=True, read_only=False, allow_empty=False)
@@ -135,3 +178,16 @@ class OrderSerializer(serializers.ModelSerializer):
 
 class OrderListSerializer(OrderSerializer):
     tickets = TicketListSerializer(many=True, read_only=True)
+
+
+class MovieImageSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Movie
+        fields = ("id", "image")
+        extra_kwargs = {"image": {"required": True}}
+
+
+class MovieWriteSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Movie
+        fields = ("id", "title", "description", "duration", "genres", "actors")
